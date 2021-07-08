@@ -1,10 +1,9 @@
 package main
 
+import "C"
+
 import (
-	"bytes"
-	"encoding/json"
-	"flag"
-	"io/ioutil"
+	"fmt"
 	"log"
 	"os"
 
@@ -12,36 +11,21 @@ import (
 )
 
 func main() {
+
+}
+
+//export ConvertToJson
+func ConvertToJson(input *C.char) *C.char {
 	logger := log.New(os.Stderr, "", 0)
-
 	var options convert.Options
+	options.Simplify = false
+	fmt.Println("\n Hcl input to convert -- %s" + C.GoString(input))
 
-	flag.BoolVar(&options.Simplify, "simplify", false, "If true attempt to simply expressions which don't contain any variables or unknown functions")
-	flag.Parse()
-
-	var filename = flag.Arg(0)
-	var fileBytes []byte
-	var err error
-	if filename == "" || filename == "-" {
-		fileBytes, err = ioutil.ReadAll(os.Stdin)
-	} else {
-		fileBytes, err = ioutil.ReadFile(filename)
-	}
-	if err != nil {
-		logger.Fatalf("Failed to read file: %s\n", err)
-	}
-
-	converted, err := convert.Bytes(fileBytes, filename, options)
+	converted, err := convert.Bytes([] byte(C.GoString(input)), "", options)
 	if err != nil {
 		logger.Fatalf("Failed to convert file: %v", err)
 	}
+	fmt.Printf("\n Converted json -- %s", string(converted))
 
-	var indented bytes.Buffer
-	if err := json.Indent(&indented, converted, "", "    "); err != nil {
-		logger.Fatalf("Failed to indent file: %v", err)
-	}
-
-	if _, err := indented.WriteTo(os.Stdout); err != nil {
-		logger.Fatalf("Failed to write to standard out: %v", err)
-	}
+	return C.CString(string(converted))
 }
