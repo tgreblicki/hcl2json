@@ -15,5 +15,10 @@ hcl2json
 # Intellij
 .idea/
 
-# Golang vendor files
+#gradle, gogradle and dependencies output
+.gogradle/
+.gradle/
+.gotools/
 vendor/
+
+build
