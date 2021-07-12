@@ -1,0 +1,213 @@
+import com.github.blindpirate.gogradle.Go
+
+import java.nio.file.Paths
+import java.text.SimpleDateFormat
+
+buildscript {
+    repositories {
+        mavenLocal()
+        ["public", "thirdparty", "releases"].each { r ->
+            maven {
+                credentials {
+                    username nexusUserName
+                    password nexusPassword
+                }
+                url "${nexusBaseUrl}/repositories/${r}"
+            }
+        }
+    }
+
+    dependencies {
+        if (project.gradle.startParameter.taskNames.contains("final")) {
+            classpath "com.netflix.nebula:nebula-release-plugin:${nebulaReleasePluginVersion}"
+        }
+        classpath "com.xebialabs.gradle.plugins:gradle-xl-plugins-plugin:${xlPluginsPluginVersion}"
+    }
+}
+
+plugins {
+    id 'com.github.blindpirate.gogradle' version '0.11.3'
+    id 'org.sonarqube' version '2.6.2'
+}
+
+apply plugin: 'xebialabs.root.opinions'
+apply plugin: 'xebialabs.opinions'
+apply plugin: 'maven-publish'
+apply plugin: 'org.sonarqube'
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId 'com.xebialabs.xlclient'
+            artifactId 'xl-client'
+            artifact("./build/darwin-amd64/xl") {
+                classifier = 'darwin-amd64'
+                extension = 'bin'
+            }
+            artifact("./build/linux-amd64/xl") {
+                classifier = 'linux-amd64'
+                extension = 'bin'
+            }
+            artifact("./build/windows-amd64/xl.exe") {
+                classifier = 'windows-amd64'
+                extension = 'exe'
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            def alphasRepoUrl = "${nexusBaseUrl}/repositories/alphas/"
+            def releasesRepoUrl = "${nexusBaseUrl}/repositories/releases/"
+            url project.version.toString().contains('alpha') ? alphasRepoUrl : releasesRepoUrl
+            credentials {
+                username nexusUserName
+                password nexusPassword
+            }
+        }
+    }
+}
+
+golang {
+    goVersion = '1.16'
+    packagePath = 'github.com/tmccombs/hcl2json' // go import path of project to be built, NOT local file system path!
+}
+
+task installTemplify(type: Go) {
+    outputs.files ".gogradle/project_gopath/bin/templify"
+    go "get github.com/wlbr/templify"
+}
+
+task installPackr(type: Go) {
+    outputs.files ".gogradle/project_gopath/bin/packr"
+    go "get github.com/gobuffalo/packr/packr"
+}
+
+def platforms = [
+        'darwin-amd64',
+        'linux-amd64',
+        'windows-amd64'
+]
+
+goBuild {
+    // Cross-compile platforms, update as necessary.
+    targetPlatform = platforms
+    environment "CGO_ENABLED", "1"
+
+    def gitCommit = runCmd('git', 'rev-parse', 'HEAD')
+    def gitVersion = runCmd('git', 'describe', '--long', '--dirty')
+    def gitVersionShort = gitVersion.startsWith("hcl2json") ? gitVersion.substring(10) : gitVersion
+
+    def simpleDateFormat = new SimpleDateFormat("yyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+    simpleDateFormat.setTimeZone(TimeZone.getTimeZone("UTC"))
+    def date = simpleDateFormat.format(new Date())
+
+    def ldflags = " -ldflags='" +
+            ldflag("ConverterVersion", { -> project.version}) +
+            ldflag("BuildVersion", gitVersionShort) +
+            ldflag("BuildGitCommit", gitCommit) +
+            ldflag("BuildDate", date) +
+            (project.hasProperty("optimise") ? "-s -w" : "") +
+            "'"
+
+    println("LDFlags: ${ldflags}cp")
+    def debugFlags = project.hasProperty("debug") ? " -gcflags \"all=-N -l\"" : ""
+
+    // The ${} placeholder will be rendered in cross-compile
+    go "build${debugFlags} -buildmode=c-shared -o ./build/\${GOOS}-\${GOARCH}/hcl2json main.go"
+    dumpVersion
+}
+
+task removeLicenseFolder {
+    doLast {
+        runCmd("rm", "-f", "licenses/licences.md")
+    }
+}
+
+task downloadLicenses(type: Copy) {
+    dependsOn removeLicenseFolder
+    into 'licenses'
+    from 'go.mod'
+    rename { it - 'go.mod' + 'licences.md'}
+    filter { line ->
+        def result = (line =~ /^[\s]+[a-zA-Z0-9.\/-]+/)
+        if (result) {
+            return "http://${result[0].trim()}"
+        }
+    }
+}
+
+task updateLicenses {
+    inputs.files "go.mod"
+    dependsOn downloadLicenses
+}
+
+task uploadArchives {
+    doLast {
+        println 'No impl for uploadArchives yet'
+    }
+}
+
+task test {
+    dependsOn goTest
+}
+
+clean.doFirst {
+    delete 'build'
+}
+
+sonarqube {
+    properties {
+        property "sonar.projectKey", "hcl2json"
+        property "sonar.projectName", "hcl2json"
+        property "sonar.sources", "./"
+        property "sonar.exclusions", "**/*_test.go,**/vendor/**"
+        property "sonar.go.coverage.reportPaths", ".gogradle/reports/coverage/**/*.out"
+    }
+}
+
+// The way tasks dependOn here are very important, please don't change unless there is a valid reason
+check.dependsOn installTemplify, installPackr
+goBuild.dependsOn goPrepare, test
+goBuild.finalizedBy updateLicenses
+build.dependsOn goBuild
+goTest.dependsOn goPrepare
+goClean.dependsOn clean
+
+// disable these tasks as dependencies are mnaged with go modules
+project.gradle.startParameter.excludedTaskNames.add('installDependencies')
+project.gradle.startParameter.excludedTaskNames.add('resolveBuildDependencies')
+project.gradle.startParameter.excludedTaskNames.add('resolveTestDependencies')
+project.gradle.startParameter.excludedTaskNames.add('goVendor')
+
+/* Private utility functions  */
+
+def runCmd(Object... args) {
+    def stdout = new ByteArrayOutputStream()
+    exec {
+        commandLine args
+        standardOutput = stdout
+    }
+    return stdout.toString().trim()
+}
+
+def ldflag(c, v) {
+    "-X \"github.com/tmccombs/hcl2json/convert.${c}=${v}\" "
+}
+
+def validateVersions(key) {
+    def versions = project.property(key)
+    def valid = false
+    def semverPattern = ~/^([0-9]*)\.([0-9]*)(\.([0-9]+)(-([0-9]*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.([0-9]*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?)?$/
+    def nebulaReleasePattern = ~/^[0-9]+(\.[0-9]+){2}(-[0-9]+\.[0-9]+)?$/
+    def cleanVersions = []
+
+    versions.split(',').each {
+        if (!it.trim().matches(semverPattern) || it.trim().matches(nebulaReleasePattern)) {
+            valid = true
+        }
+        cleanVersions.add(it.trim())
+    }
+    if (!valid) throw new GradleException("Invalid versions passed for ${key} property, pass comma seperated versions in semver format. E.g: 9.0.5, 9.5")
+    return cleanVersions.join(',')
+}
