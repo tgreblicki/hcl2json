@@ -1,6 +1,5 @@
 import com.github.blindpirate.gogradle.Go
 
-import java.nio.file.Paths
 import java.text.SimpleDateFormat
 
 buildscript {
@@ -28,6 +27,7 @@ buildscript {
 plugins {
     id 'com.github.blindpirate.gogradle' version '0.11.3'
     id 'org.sonarqube' version '2.6.2'
+    id 'java'
 }
 
 apply plugin: 'xebialabs.root.opinions'
@@ -35,23 +35,14 @@ apply plugin: 'xebialabs.opinions'
 apply plugin: 'maven-publish'
 apply plugin: 'org.sonarqube'
 
+def platform = project.property("platform")
+
 publishing {
     publications {
         maven(MavenPublication) {
-            groupId 'com.xebialabs.xlclient'
-            artifactId 'xl-client'
-            artifact("./build/darwin-amd64/xl") {
-                classifier = 'darwin-amd64'
-                extension = 'bin'
-            }
-            artifact("./build/linux-amd64/xl") {
-                classifier = 'linux-amd64'
-                extension = 'bin'
-            }
-            artifact("./build/windows-amd64/xl.exe") {
-                classifier = 'windows-amd64'
-                extension = 'exe'
-            }
+            groupId 'ai.digital.hcl2json'
+            artifactId "hcl2json-${platform}"
+            artifact("./build/libs/hcl2json-${platform}-${project.version}.jar")
         }
     }
 
@@ -69,7 +60,7 @@ publishing {
 }
 
 golang {
-    goVersion = '1.16'
+    goVersion = '1.14'
     packagePath = 'github.com/tmccombs/hcl2json' // go import path of project to be built, NOT local file system path!
 }
 
@@ -83,15 +74,15 @@ task installPackr(type: Go) {
     go "get github.com/gobuffalo/packr/packr"
 }
 
-def platforms = [
-        'darwin-amd64',
-        'linux-amd64',
-        'windows-amd64'
-]
+processResources {
+    from("build/golib/") {
+        into "hcl2json"
+    }
+}
 
 goBuild {
     // Cross-compile platforms, update as necessary.
-    targetPlatform = platforms
+    targetPlatform = [platform]
     environment "CGO_ENABLED", "1"
 
     def gitCommit = runCmd('git', 'rev-parse', 'HEAD')
@@ -114,7 +105,7 @@ goBuild {
     def debugFlags = project.hasProperty("debug") ? " -gcflags \"all=-N -l\"" : ""
 
     // The ${} placeholder will be rendered in cross-compile
-    go "build${debugFlags} -buildmode=c-shared -o ./build/\${GOOS}-\${GOARCH}/hcl2json main.go"
+    go "build${debugFlags} -buildmode=c-shared -o ./build/golib/\${GOOS}-\${GOARCH}/hcl2json main.go"
     dumpVersion
 }
 
@@ -148,12 +139,14 @@ task uploadArchives {
     }
 }
 
-task test {
-    dependsOn goTest
-}
+test.dependsOn goTest
 
 clean.doFirst {
     delete 'build'
+}
+
+jar {
+    archiveAppendix="$platform"
 }
 
 sonarqube {
@@ -170,7 +163,7 @@ sonarqube {
 check.dependsOn installTemplify, installPackr
 goBuild.dependsOn goPrepare, test
 goBuild.finalizedBy updateLicenses
-build.dependsOn goBuild
+assemble.dependsOn goBuild
 goTest.dependsOn goPrepare
 goClean.dependsOn clean
 
