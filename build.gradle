@@ -227,3 +227,7 @@ def getCC() {
     }
     return ""
 }
+
+nebulaRelease {
+    releaseBranchPatterns=["main"]
+}
