@@ -84,6 +84,9 @@ goBuild {
     // Cross-compile platforms, update as necessary.
     targetPlatform = [platform]
     environment "CGO_ENABLED", "1"
+    if(!getCC().isEmpty()) {
+        environment "CC", getCC()
+    }
 
     def gitCommit = runCmd('git', 'rev-parse', 'HEAD')
     def gitVersion = runCmd('git', 'describe', '--long', '--dirty')
@@ -216,4 +219,11 @@ def getPlatform() {
         return "darwin-amd64"
     }
     return "linux-amd64"
+}
+
+def getCC() {
+    if(project.hasProperty("cc")) {
+        return project.property("cc")
+    }
+    return ""
 }
