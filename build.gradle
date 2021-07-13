@@ -1,5 +1,5 @@
 import com.github.blindpirate.gogradle.Go
-
+import org.apache.tools.ant.taskdefs.condition.Os
 import java.text.SimpleDateFormat
 
 buildscript {
@@ -35,7 +35,7 @@ apply plugin: 'xebialabs.opinions'
 apply plugin: 'maven-publish'
 apply plugin: 'org.sonarqube'
 
-def platform = project.property("platform")
+def platform = getPlatform()
 
 publishing {
     publications {
@@ -203,4 +203,17 @@ def validateVersions(key) {
     }
     if (!valid) throw new GradleException("Invalid versions passed for ${key} property, pass comma seperated versions in semver format. E.g: 9.0.5, 9.5")
     return cleanVersions.join(',')
+}
+
+def getPlatform() {
+    if(project.hasProperty("platform")) {
+        return project.property("platform")
+    }
+    if(Os.isFamily(Os.FAMILY_WINDOWS)) {
+        return "windows-amd64"
+    }
+    if(Os.isFamily(Os.FAMILY_MAC)) {
+        return "darwin-amd64"
+    }
+    return "linux-amd64"
 }
